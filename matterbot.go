@@ -6,6 +6,7 @@ import (
   "flag"
   "syscall"
   "strings"
+  "bytes"
 
   "github.com/mattermost/mattermost-server/model"
 
@@ -18,6 +19,7 @@ func main() {
     passwordPtr := flag.String("password", "-", "when - then read from stdin")
     teamPtr := flag.String("team", "", "team name")
     channelPtr := flag.String("channel", "", "channel name")
+    victimPtr := flag.String("victim", "", "victim user")
 
     flag.Parse()
 
@@ -36,9 +38,17 @@ func main() {
         os.Exit(1)
     }
 
+    if *victimPtr == "" {
+        fmt.Println("Missing victim user name")
+        os.Exit(1)
+    }
+
+    wsAddress := strings.Replace(*serverPtr, "http", "ws", 1)
+    fmt.Printf("WebSocket address '%s'\n\n", wsAddress)
+
     Client := model.NewAPIv4Client(*serverPtr)
 
-    password := ""
+    var password string
     if *passwordPtr == "-" {
         fmt.Print("Enter password: ")
 
@@ -62,6 +72,13 @@ func main() {
     password = ""
     *passwordPtr = ""
 
+    victim, resp := Client.GetUserByUsername(*victimPtr, "")
+    if resp.Error != nil {
+        fmt.Printf("Cannot find the user '%s'\n\n", *victimPtr)
+        PrintServerError(resp.Error)
+        os.Exit(1)
+    }
+
     team, resp := Client.GetTeamByName(*teamPtr, "")
     if resp.Error != nil {
         fmt.Printf("Cannot find the team '%s'\n\n", *teamPtr)
@@ -76,18 +93,18 @@ func main() {
         os.Exit(1)
     }
 
-    if nil != PostMessageToChannel(Client, channel.Id, "Hello, world!") {
+    var buffer bytes.Buffer
+    buffer.WriteString("Hello @")
+    buffer.WriteString(*victimPtr)
+
+    if nil != PostMessageToChannel(Client, channel.Id, "", buffer.String()) {
         os.Exit(1)
     }
 
     fmt.Println("Posted!")
 
-    // Replace https with ws
-    parts := strings.Split(*serverPtr, ":")
-    parts[0] = "ws"
-    wsAddress := strings.Join(parts, ":")
-
     webSocketClient, err := model.NewWebSocketClient4(wsAddress, Client.AuthToken)
+    fmt.Println("Client created ...")
 
     if err != nil {
         fmt.Printf("Failed to connects WebSocket at '%s'\n\n", wsAddress)
@@ -96,12 +113,13 @@ func main() {
     }
 
     webSocketClient.Listen()
+    fmt.Println("Listening ...")
 
     go func() {
         for {
             select {
                 case resp := <-webSocketClient.EventChannel:
-                    HandleWebSocketResponse(Client, channel.Id, resp)
+                    HandleWebSocketResponse(Client, channel.Id, victim.Id, resp)
            }
         }
     }()
@@ -117,9 +135,10 @@ func PrintServerError(err *model.AppError) {
 	fmt.Println("\t\t" + err.DetailedError)
 }
 
-func PostMessageToChannel(client *model.Client4, channelId string, msg string) *model.AppError {
+func PostMessageToChannel(client *model.Client4, channelId string, postId string, msg string) *model.AppError {
     post := &model.Post{}
     post.ChannelId = channelId
+    post.RootId = postId
     post.Message = msg
 
     if _, resp := client.CreatePost(post); resp.Error != nil {
@@ -131,7 +150,7 @@ func PostMessageToChannel(client *model.Client4, channelId string, msg string) *
     return nil
 }
 
-func HandleWebSocketResponse(client *model.Client4, channelId string, event *model.WebSocketEvent) {
+func HandleWebSocketResponse(client *model.Client4, channelId string, victimId string, event *model.WebSocketEvent) {
     if event.Broadcast.ChannelId != channelId {
         return
     }
@@ -141,11 +160,14 @@ func HandleWebSocketResponse(client *model.Client4, channelId string, event *mod
     }
 
     post := model.PostFromJson(strings.NewReader(event.Data["post"].(string)))
-
     if post != nil {
+        if post.UserId != victimId {
+            return
+        }
+
         if post.Message != "Thank you!" {
             fmt.Println(post.Message)
-            PostMessageToChannel(client, channelId, "Thank you!")
+            PostMessageToChannel(client, channelId, post.Id, "Thank you!")
         }
     }
 }
