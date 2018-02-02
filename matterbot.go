@@ -39,8 +39,7 @@ func main() {
     }
 
     if *victimPtr == "" {
-        fmt.Println("Missing victim user name")
-        os.Exit(1)
+        fmt.Println("Missing victim user name - will reply to everyone!")
     }
 
     wsAddress := strings.Replace(*serverPtr, "http", "ws", 1)
@@ -72,11 +71,21 @@ func main() {
     password = ""
     *passwordPtr = ""
 
-    victim, resp := Client.GetUserByUsername(*victimPtr, "")
-    if resp.Error != nil {
-        fmt.Printf("Cannot find the user '%s'\n\n", *victimPtr)
-        PrintServerError(resp.Error)
-        os.Exit(1)
+    var helloMessage bytes.Buffer
+    helloMessage.WriteString("Hello")
+
+    var victimId string
+    if *victimPtr != "" {
+        if victim, resp := Client.GetUserByUsername(*victimPtr, ""); resp.Error != nil {
+            fmt.Printf("Cannot find the user '%s'\n\n", *victimPtr)
+            PrintServerError(resp.Error)
+            os.Exit(1)
+        } else {
+            victimId = victim.Id
+        }
+
+        helloMessage.WriteString(" @")
+        helloMessage.WriteString(*victimPtr)
     }
 
     team, resp := Client.GetTeamByName(*teamPtr, "")
@@ -93,11 +102,7 @@ func main() {
         os.Exit(1)
     }
 
-    var buffer bytes.Buffer
-    buffer.WriteString("Hello @")
-    buffer.WriteString(*victimPtr)
-
-    if nil != PostMessageToChannel(Client, channel.Id, "", buffer.String()) {
+    if nil != PostMessageToChannel(Client, channel.Id, "", helloMessage.String()) {
         os.Exit(1)
     }
 
@@ -119,7 +124,7 @@ func main() {
         for {
             select {
                 case resp := <-webSocketClient.EventChannel:
-                    HandleWebSocketResponse(Client, channel.Id, victim.Id, resp)
+                    HandleWebSocketResponse(Client, channel.Id, victimId, resp)
            }
         }
     }()
@@ -161,12 +166,11 @@ func HandleWebSocketResponse(client *model.Client4, channelId string, victimId s
 
     post := model.PostFromJson(strings.NewReader(event.Data["post"].(string)))
     if post != nil {
-        if post.UserId != victimId {
+        if victimId != "" && post.UserId != victimId {
             return
         }
 
         if post.Message != "Thank you!" {
-            fmt.Println(post.Message)
             PostMessageToChannel(client, channelId, post.Id, "Thank you!")
         }
     }
