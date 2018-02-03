@@ -62,7 +62,8 @@ func main() {
         password = *passwordPtr
     }
 
-    if _, resp := Client.Login(*loginPtr, password); resp.Error != nil {
+    botUser, resp := Client.Login(*loginPtr, password)
+    if resp.Error != nil {
         fmt.Printf("Cannot login as the user '%s'\n\n", *loginPtr)
         PrintServerError(resp.Error)
         os.Exit(1)
@@ -124,7 +125,7 @@ func main() {
         for {
             select {
                 case resp := <-webSocketClient.EventChannel:
-                    HandleWebSocketResponse(Client, channel.Id, victimId, resp)
+                    HandleWebSocketResponse(Client, channel.Id, victimId, botUser.Id, resp)
            }
         }
     }()
@@ -155,7 +156,7 @@ func PostMessageToChannel(client *model.Client4, channelId string, postId string
     return nil
 }
 
-func HandleWebSocketResponse(client *model.Client4, channelId string, victimId string, event *model.WebSocketEvent) {
+func HandleWebSocketResponse(client *model.Client4, channelId string, victimId string, botId string, event *model.WebSocketEvent) {
     if event.Broadcast.ChannelId != channelId {
         return
     }
@@ -166,12 +167,21 @@ func HandleWebSocketResponse(client *model.Client4, channelId string, victimId s
 
     post := model.PostFromJson(strings.NewReader(event.Data["post"].(string)))
     if post != nil {
+        if post.UserId == botId {
+            return
+        }
+
         if victimId != "" && post.UserId != victimId {
             return
         }
 
-        if post.Message != "Thank you!" {
-            PostMessageToChannel(client, channelId, post.Id, "Thank you!")
+        switch post.Type {
+            case model.POST_JOIN_CHANNEL:
+                PostMessageToChannel(client, channelId, post.Id, "Alright mate?")
+            case model.POST_DEFAULT:
+                PostMessageToChannel(client, channelId, post.Id, "That's cool!")
+            case model.POST_LEAVE_CHANNEL:
+                PostMessageToChannel(client, channelId, post.Id, "See you later alligator!")
         }
     }
 }
