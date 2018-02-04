@@ -20,6 +20,7 @@ type Parameters struct {
 }
 
 type Bot struct {
+    Client *model.Client4
     Params Parameters
 }
 
@@ -131,12 +132,12 @@ func main() {
     webSocketClient.Listen()
     fmt.Println("Listening ...")
 
-    bot := Bot{Params: Parameters{UserId: botUser.Id, ChannelId: channel.Id, VictimId: victimId}}
+    bot := Bot{Client: Client, Params: Parameters{UserId: botUser.Id, ChannelId: channel.Id, VictimId: victimId}}
     go func() {
         for {
             select {
                 case resp := <-webSocketClient.EventChannel:
-                    bot.HandleWebSocketResponse(Client, resp)
+                    bot.HandleWebSocketResponse(resp)
            }
         }
     }()
@@ -167,32 +168,34 @@ func PostMessageToChannel(client *model.Client4, channelId string, postId string
     return nil
 }
 
-func (b* Bot) HandleWebSocketResponse(client *model.Client4, event *model.WebSocketEvent) {
+func (b* Bot) HandleWebSocketResponse(event *model.WebSocketEvent) {
     if event.Broadcast.ChannelId != b.Params.ChannelId {
         return
     }
 
-    if event.Event != model.WEBSOCKET_EVENT_POSTED {
+    switch event.Event {
+        case model.WEBSOCKET_EVENT_POSTED:
+            if post := model.PostFromJson(strings.NewReader(event.Data["post"].(string))); post != nil {
+                b.HandleEventPosted(post)
+            }
+    }
+}
+
+func (b* Bot) HandleEventPosted(post *model.Post) {
+    if post.UserId == b.Params.UserId {
         return
     }
 
-    post := model.PostFromJson(strings.NewReader(event.Data["post"].(string)))
-    if post != nil {
-        if post.UserId == b.Params.UserId {
-            return
-        }
+    if b.Params.VictimId != "" && post.UserId != b.Params.VictimId {
+        return
+    }
 
-        if b.Params.VictimId != "" && post.UserId != b.Params.VictimId {
-            return
-        }
-
-        switch post.Type {
-            case model.POST_JOIN_CHANNEL:
-                PostMessageToChannel(client, b.Params.ChannelId, post.Id, "Alright mate?")
-            case model.POST_DEFAULT:
-                PostMessageToChannel(client, b.Params.ChannelId, post.Id, "That's cool!")
-            case model.POST_LEAVE_CHANNEL:
-                PostMessageToChannel(client, b.Params.ChannelId, post.Id, "See you later alligator!")
-        }
+    switch post.Type {
+        case model.POST_JOIN_CHANNEL:
+            PostMessageToChannel(b.Client, b.Params.ChannelId, post.Id, "Alright mate?")
+        case model.POST_DEFAULT:
+            PostMessageToChannel(b.Client, b.Params.ChannelId, post.Id, "That's cool!")
+        case model.POST_LEAVE_CHANNEL:
+            PostMessageToChannel(b.Client, b.Params.ChannelId, post.Id, "See you later alligator!")
     }
 }
