@@ -13,6 +13,16 @@ import (
   "golang.org/x/crypto/ssh/terminal"
 )
 
+type Parameters struct {
+    UserId string
+    ChannelId string
+    VictimId string
+}
+
+type Bot struct {
+    Params Parameters
+}
+
 func main() {
     serverPtr := flag.String("server", "http://localhost:8065", "a server URL")
     loginPtr := flag.String("login", "", "your login")
@@ -121,11 +131,12 @@ func main() {
     webSocketClient.Listen()
     fmt.Println("Listening ...")
 
+    bot := Bot{Params: Parameters{UserId: botUser.Id, ChannelId: channel.Id, VictimId: victimId}}
     go func() {
         for {
             select {
                 case resp := <-webSocketClient.EventChannel:
-                    HandleWebSocketResponse(Client, channel.Id, victimId, botUser.Id, resp)
+                    bot.HandleWebSocketResponse(Client, resp)
            }
         }
     }()
@@ -156,8 +167,8 @@ func PostMessageToChannel(client *model.Client4, channelId string, postId string
     return nil
 }
 
-func HandleWebSocketResponse(client *model.Client4, channelId string, victimId string, botId string, event *model.WebSocketEvent) {
-    if event.Broadcast.ChannelId != channelId {
+func (b* Bot) HandleWebSocketResponse(client *model.Client4, event *model.WebSocketEvent) {
+    if event.Broadcast.ChannelId != b.Params.ChannelId {
         return
     }
 
@@ -167,21 +178,21 @@ func HandleWebSocketResponse(client *model.Client4, channelId string, victimId s
 
     post := model.PostFromJson(strings.NewReader(event.Data["post"].(string)))
     if post != nil {
-        if post.UserId == botId {
+        if post.UserId == b.Params.UserId {
             return
         }
 
-        if victimId != "" && post.UserId != victimId {
+        if b.Params.VictimId != "" && post.UserId != b.Params.VictimId {
             return
         }
 
         switch post.Type {
             case model.POST_JOIN_CHANNEL:
-                PostMessageToChannel(client, channelId, post.Id, "Alright mate?")
+                PostMessageToChannel(client, b.Params.ChannelId, post.Id, "Alright mate?")
             case model.POST_DEFAULT:
-                PostMessageToChannel(client, channelId, post.Id, "That's cool!")
+                PostMessageToChannel(client, b.Params.ChannelId, post.Id, "That's cool!")
             case model.POST_LEAVE_CHANNEL:
-                PostMessageToChannel(client, channelId, post.Id, "See you later alligator!")
+                PostMessageToChannel(client, b.Params.ChannelId, post.Id, "See you later alligator!")
         }
     }
 }
